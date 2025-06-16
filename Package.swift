@@ -5,6 +5,10 @@ import PackageDescription
 
 let package = Package(
     name: "DataIO",
+    platforms: [
+        .macOS(.v11),
+        .iOS(.v15)
+    ],
     products: [
         .library(
             name: "DataIO",
