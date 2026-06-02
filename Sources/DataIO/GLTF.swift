@@ -1723,6 +1723,7 @@ public func alignValue(_ value: Int, to alignment: Int = 4) -> Int {
 
 public struct GLTFLibrary: Sendable {
     public var gltf: GLTF
+    /// Possibly pairs of external data url + their data, for instance image url + image data.
     public var data: [GLTFData] = []
     /// Actually there should be only one chunk of data, according to glTF specification
     public var binaryChunks: [Data] = []
@@ -1747,24 +1748,68 @@ public struct GLTFLibrary: Sendable {
         // GLB header
         let magic: UInt32 = try reader.read()
         let version: UInt32 = try reader.read()
+        // Total length of the Binary glTF, including header and all chunks, in bytes
         let _: UInt32 = try reader.read()
         
+        // Check magic number
         guard magic == 0x46546C67 else {
             throw GLTFError.other("Unknown header magic number")
         }
         
+        // Check GLTF version
         guard version == 2 else {
             throw GLTFError.other("Unknown header version: \(version)")
         }
         
-        // Json data
-        //let jsonChunkLength: UInt32 = try reader.read()
-        //let jsonChunkType: UInt32 = try reader.read()
-        //let jsonData: Data = try reader.readData(ofLength: jsonChunkLength)
-        //let gltf = try await GLTF.from(jsonData)
+        // JSON chunk data
+        let jsonChunkLength: UInt32 = try reader.read()
         
+        // 0x4E4F534A: Structured JSON content
+        // 0x004E4942: Binary buffer
+        let jsonChunkType: UInt32 = try reader.read()
+        guard jsonChunkType == 0x4E4F534A else {
+            throw GLTFError.other("\"Structured JSON content\" chunk type (0x4E4F534A) was expected, received \(jsonChunkType) instead")
+        }
         
-        throw GLTFError.notImplemented
+        let jsonData: Data = try reader.readData(ofLength: jsonChunkLength)
+        // Print JSON contents
+        //if let string = String(data: jsonData, encoding: .utf8) {
+        //    print(string)
+        //}
+        
+        let gltf = try await GLTF.from(jsonData)
+        
+        var binaryChunks = [Data]()
+        
+        // Binary chunk data is optional
+        func readChunks(_ action: () throws -> Void) throws {
+#if false
+            // In case if there are more than one binary chunk
+            let numBuffers = gltf.buffers?.count ?? 0
+            for _ in 0 ..< numBuffers {
+                try action()
+            }
+#else
+            // According to the GLB specification, there may be only one binary chunk
+            if reader.offset < reader.data.count {
+                try action()
+            }
+#endif
+        }
+        
+        try readChunks {
+            let chunkLength: UInt32 = try reader.read()
+            
+            let chunkType: UInt32 = try reader.read()
+            guard chunkType == 0x004E4942 else {
+                throw GLTFError.other("\"Binary buffer\" chunk type (0x004E4942) was expected, received \(chunkType) instead")
+            }
+            
+            let chunkData: Data = try reader.readData(ofLength: chunkLength)
+            binaryChunks.append(chunkData)
+        }
+        
+        return GLTFLibrary(gltf: gltf, binaryChunks: binaryChunks)
     }
     
     
@@ -1874,7 +1919,6 @@ public struct GLTFLibrary: Sendable {
         }
         
         
-        //throw GLTFError.notImplemented
         return glb
     }
 }
